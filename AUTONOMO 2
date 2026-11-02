@@ -1,0 +1,395 @@
+USE master;
+GO
+
+IF NOT EXISTS (SELECT name FROM sys.databases WHERE name = 'clinica_medica')
+BEGIN
+    CREATE DATABASE clinica_medica;
+END
+GO
+
+USE clinica_medica;
+GO
+
+IF OBJECT_ID('vista_recepcionista', 'V') IS NOT NULL DROP VIEW vista_recepcionista;
+IF OBJECT_ID('vista_medico', 'V') IS NOT NULL DROP VIEW vista_medico;
+IF OBJECT_ID('vista_administrador', 'V') IS NOT NULL DROP VIEW vista_administrador;
+IF OBJECT_ID('vista_diagnosticos_frecuentes', 'V') IS NOT NULL DROP VIEW vista_diagnosticos_frecuentes;
+GO
+
+IF OBJECT_ID('trg_actualizar_cita', 'TR') IS NOT NULL DROP TRIGGER trg_actualizar_cita;
+GO
+
+IF OBJECT_ID('registrar_cita', 'P') IS NOT NULL DROP PROCEDURE registrar_cita;
+IF OBJECT_ID('calcular_edad', 'FN') IS NOT NULL DROP FUNCTION calcular_edad;
+GO
+
+IF OBJECT_ID('ACTIVIDAD_ASISTENCIAL', 'U') IS NOT NULL DROP TABLE ACTIVIDAD_ASISTENCIAL;
+IF OBJECT_ID('DIAGNOSTICO', 'U') IS NOT NULL DROP TABLE DIAGNOSTICO;
+IF OBJECT_ID('HISTORIAL_CLINICO', 'U') IS NOT NULL DROP TABLE HISTORIAL_CLINICO;
+IF OBJECT_ID('CITA', 'U') IS NOT NULL DROP TABLE CITA;
+IF OBJECT_ID('MEDICO', 'U') IS NOT NULL DROP TABLE MEDICO;
+IF OBJECT_ID('PACIENTE', 'U') IS NOT NULL DROP TABLE PACIENTE;
+IF OBJECT_ID('ESPECIALIDAD', 'U') IS NOT NULL DROP TABLE ESPECIALIDAD;
+GO
+
+CREATE TABLE ESPECIALIDAD (
+    id_especialidad INT IDENTITY(1,1) PRIMARY KEY,
+    nombre VARCHAR(100) NOT NULL UNIQUE,
+    descripcion VARCHAR(255)
+);
+GO
+
+CREATE TABLE PACIENTE (
+    id_paciente INT IDENTITY(1,1) PRIMARY KEY,
+    nombres VARCHAR(100) NOT NULL,
+    apellidos VARCHAR(100) NOT NULL,
+    cedula VARCHAR(10) UNIQUE NOT NULL,
+    fecha_nacimiento DATE,
+    direccion VARCHAR(255),
+    telefono VARCHAR(15),
+    email VARCHAR(100),
+    fecha_registro DATETIME DEFAULT GETDATE()
+);
+GO
+
+CREATE TABLE MEDICO (
+    id_medico INT IDENTITY(1,1) PRIMARY KEY,
+    nombres VARCHAR(100) NOT NULL,
+    apellidos VARCHAR(100) NOT NULL,
+    cedula_profesional VARCHAR(20) UNIQUE NOT NULL,
+    id_especialidad INT,
+    telefono VARCHAR(15),
+    email VARCHAR(100),
+    CONSTRAINT FK_MEDICO_ESPECIALIDAD FOREIGN KEY (id_especialidad) REFERENCES ESPECIALIDAD(id_especialidad)
+);
+GO
+
+CREATE TABLE CITA (
+    id_cita INT IDENTITY(1,1) PRIMARY KEY,
+    id_paciente INT NOT NULL,
+    id_medico INT NOT NULL,
+    fecha_hora DATETIME NOT NULL,
+    motivo VARCHAR(255),
+    estado VARCHAR(20) DEFAULT 'Programada' CHECK (estado IN ('Programada', 'Atendida', 'Cancelada', 'No Asistio')),
+    observaciones VARCHAR(MAX),
+    CONSTRAINT FK_CITA_PACIENTE FOREIGN KEY (id_paciente) REFERENCES PACIENTE(id_paciente) ON DELETE CASCADE,
+    CONSTRAINT FK_CITA_MEDICO FOREIGN KEY (id_medico) REFERENCES MEDICO(id_medico) ON DELETE CASCADE
+);
+GO
+
+CREATE TABLE HISTORIAL_CLINICO (
+    id_historial INT IDENTITY(1,1) PRIMARY KEY,
+    id_paciente INT UNIQUE NOT NULL,
+    fecha_apertura DATE NOT NULL DEFAULT CAST(GETDATE() AS DATE),
+    alergias VARCHAR(MAX),
+    antecedentes_familiares VARCHAR(MAX),
+    antecedentes_personales VARCHAR(MAX),
+    grupo_sanguineo VARCHAR(5),
+    CONSTRAINT FK_HISTORIAL_PACIENTE FOREIGN KEY (id_paciente) REFERENCES PACIENTE(id_paciente) ON DELETE CASCADE
+);
+GO
+
+CREATE TABLE DIAGNOSTICO (
+    id_diagnostico INT IDENTITY(1,1) PRIMARY KEY,
+    id_historial INT NOT NULL,
+    id_cita INT NOT NULL,
+    codigo_cie10 VARCHAR(10) NOT NULL,
+    descripcion VARCHAR(255) NOT NULL,
+    fecha_diagnostico DATE NOT NULL DEFAULT CAST(GETDATE() AS DATE),
+    tipo VARCHAR(20) CHECK (tipo IN ('Principal', 'Secundario', 'Presuntivo')),
+    CONSTRAINT FK_DIAG_HISTORIAL FOREIGN KEY (id_historial) REFERENCES HISTORIAL_CLINICO(id_historial) ON DELETE CASCADE,
+    CONSTRAINT FK_DIAG_CITA FOREIGN KEY (id_cita) REFERENCES CITA(id_cita) -- Sin CASCADE para evitar ciclos
+);
+GO
+
+CREATE TABLE ACTIVIDAD_ASISTENCIAL (
+    id_actividad INT IDENTITY(1,1) PRIMARY KEY,
+    id_cita INT NOT NULL,
+    tipo VARCHAR(50) NOT NULL CHECK (tipo IN ('Consulta', 'Procedimiento', 'Examen', 'Terapia')),
+    descripcion VARCHAR(255) NOT NULL,
+    costo DECIMAL(10, 2) DEFAULT 0.00,
+    fecha_realizacion DATETIME DEFAULT GETDATE(),
+    CONSTRAINT FK_ACTIVIDAD_CITA FOREIGN KEY (id_cita) REFERENCES CITA(id_cita) ON DELETE CASCADE
+);
+GO
+
+CREATE INDEX idx_paciente_cedula ON PACIENTE(cedula);
+CREATE INDEX idx_paciente_apellidos ON PACIENTE(apellidos);
+CREATE INDEX idx_medico_especialidad ON MEDICO(id_especialidad);
+CREATE INDEX idx_cita_fecha ON CITA(fecha_hora);
+CREATE INDEX idx_cita_paciente ON CITA(id_paciente);
+CREATE INDEX idx_cita_medico ON CITA(id_medico);
+CREATE INDEX idx_diagnostico_cie10 ON DIAGNOSTICO(codigo_cie10);
+CREATE INDEX idx_diagnostico_fecha ON DIAGNOSTICO(fecha_diagnostico);
+GO
+
+INSERT INTO ESPECIALIDAD (nombre, descripcion) VALUES
+('Medicina General', 'Atención médica primaria y general'),
+('Pediatría', 'Atención médica para niños y adolescentes'),
+('Cardiología', 'Especialidad del corazón y sistema circulatorio'),
+('Dermatología', 'Especialidad de la piel'),
+('Ginecología', 'Especialidad del sistema reproductor femenino'),
+('Traumatología', 'Especialidad de huesos y músculos');
+GO
+
+INSERT INTO PACIENTE (nombres, apellidos, cedula, fecha_nacimiento, direccion, telefono, email) VALUES
+('Juan Carlos', 'Pérez Gómez', '0102030405', '1985-03-15', 'Av. Siempre Viva 123', '0991234567', 'juan.perez@email.com'),
+('María Fernanda', 'López Ruiz', '0102030406', '1990-07-22', 'Calle Falsa 456', '0987654321', 'maria.lopez@email.com'),
+('Pedro José', 'García Mora', '0102030407', '1978-11-30', 'Av. Central 789', '0976543210', 'pedro.garcia@email.com'),
+('Ana Cristina', 'Martínez Vega', '0102030408', '2000-01-10', 'Calle 10 de Agosto 321', '0965432109', 'ana.martinez@email.com'),
+('Luis Alberto', 'Sánchez Torres', '0102030409', '1995-05-25', 'Av. Los Andes 654', '0954321098', 'luis.sanchez@email.com');
+GO
+
+INSERT INTO MEDICO (nombres, apellidos, cedula_profesional, id_especialidad, telefono, email) VALUES
+('Dr. Carlos', 'Mendoza Ríos', 'MED-001', 1, '0991111111', 'carlos.mendoza@clinica.com'),
+('Dra. Laura', 'Jiménez Paz', 'MED-002', 2, '0992222222', 'laura.jimenez@clinica.com'),
+('Dr. Roberto', 'Vargas Luna', 'MED-003', 3, '0993333333', 'roberto.vargas@clinica.com'),
+('Dra. Patricia', 'Castillo Mora', 'MED-004', 4, '0994444444', 'patricia.castillo@clinica.com'),
+('Dr. Andrés', 'Rojas Peña', 'MED-005', 5, '0995555555', 'andres.rojas@clinica.com');
+GO
+
+INSERT INTO CITA (id_paciente, id_medico, fecha_hora, motivo, estado) VALUES
+(1, 1, '2026-10-20 09:00:00', 'Dolor de cabeza persistente', 'Atendida'),
+(2, 2, '2026-10-20 10:30:00', 'Control pediátrico', 'Atendida'),
+(3, 3, '2026-10-21 11:00:00', 'Dolor en el pecho', 'Atendida'),
+(4, 4, '2026-10-22 14:00:00', 'Erupción en la piel', 'Programada'),
+(5, 5, '2026-10-23 16:30:00', 'Dolor de rodilla', 'Programada'),
+(1, 1, '2026-11-01 09:00:00', 'Chequeo general', 'Programada');
+GO
+
+INSERT INTO HISTORIAL_CLINICO (id_paciente, fecha_apertura, alergias, antecedentes_familiares, antecedentes_personales, grupo_sanguineo) VALUES
+(1, '2026-10-20', 'Penicilina', 'Padre con hipertensión', 'Ninguno', 'O+'),
+(2, '2026-10-20', 'Ninguna', 'Madre con diabetes', 'Ninguno', 'A+'),
+(3, '2026-10-21', 'Ninguna', 'Abuelo con problemas cardíacos', 'Colesterol alto', 'B+'),
+(4, '2026-10-22', 'Ninguna', 'Ninguno', 'Ninguno', 'AB+'),
+(5, '2026-10-23', 'Ninguna', 'Ninguno', 'Cirugía de rodilla previa', 'O-');
+GO
+
+INSERT INTO DIAGNOSTICO (id_historial, id_cita, codigo_cie10, descripcion, fecha_diagnostico, tipo) VALUES
+(1, 1, 'J00', 'Rinofaringitis aguda (resfriado común)', '2026-10-20', 'Principal'),
+(2, 2, 'Z00.1', 'Examen de rutina de niño sano', '2026-10-20', 'Principal'),
+(3, 3, 'I10', 'Hipertensión esencial (primaria)', '2026-10-21', 'Principal'),
+(3, 3, 'E78.5', 'Hiperlipidemia no especificada', '2026-10-21', 'Secundario'),
+(4, 4, 'L20.9', 'Dermatitis atópica, no especificada', '2026-10-22', 'Presuntivo'),
+(5, 5, 'M17.9', 'Gonartrosis, no especificada', '2026-10-23', 'Principal');
+GO
+
+INSERT INTO ACTIVIDAD_ASISTENCIAL (id_cita, tipo, descripcion, costo, fecha_realizacion) VALUES
+(1, 'Consulta', 'Consulta de medicina general', 25.00, '2026-10-20 09:30:00'),
+(2, 'Consulta', 'Consulta pediátrica', 30.00, '2026-10-20 11:00:00'),
+(3, 'Consulta', 'Consulta cardiológica', 50.00, '2026-10-21 11:30:00'),
+(3, 'Examen', 'Electrocardiograma', 35.00, '2026-10-21 12:00:00'),
+(4, 'Consulta', 'Consulta dermatológica', 40.00, '2026-10-22 14:30:00'),
+(5, 'Consulta', 'Consulta traumatológica', 45.00, '2026-10-23 17:00:00'),
+(5, 'Examen', 'Radiografía de rodilla', 60.00, '2026-10-23 17:30:00');
+GO
+
+CREATE VIEW vista_recepcionista AS
+SELECT
+    c.id_cita,
+    CONCAT(p.nombres, ' ', p.apellidos) AS nombre_paciente,
+    p.cedula AS cedula_paciente,
+    p.telefono AS telefono_paciente,
+    CONCAT(m.nombres, ' ', m.apellidos) AS nombre_medico,
+    e.nombre AS especialidad,
+    c.fecha_hora,
+    c.motivo,
+    c.estado
+FROM CITA c
+INNER JOIN PACIENTE p ON c.id_paciente = p.id_paciente
+INNER JOIN MEDICO m ON c.id_medico = m.id_medico
+INNER JOIN ESPECIALIDAD e ON m.id_especialidad = e.id_especialidad;
+GO
+
+CREATE VIEW vista_medico AS
+SELECT
+    CONCAT(p.nombres, ' ', p.apellidos) AS nombre_paciente,
+    p.cedula,
+    p.fecha_nacimiento,
+    h.alergias,
+    h.antecedentes_familiares,
+    h.antecedentes_personales,
+    h.grupo_sanguineo,
+    d.fecha_diagnostico,
+    d.codigo_cie10,
+    d.descripcion AS diagnostico,
+    d.tipo AS tipo_diagnostico
+FROM PACIENTE p
+INNER JOIN HISTORIAL_CLINICO h ON p.id_paciente = h.id_paciente
+LEFT JOIN DIAGNOSTICO d ON h.id_historial = d.id_historial;
+GO
+
+CREATE VIEW vista_administrador AS
+SELECT
+    CONCAT(m.nombres, ' ', m.apellidos) AS nombre_medico,
+    e.nombre AS especialidad,
+    COUNT(DISTINCT c.id_cita) AS total_citas,
+    COUNT(DISTINCT a.id_actividad) AS total_actividades,
+    COALESCE(SUM(a.costo), 0) AS ingresos_totales
+FROM MEDICO m
+INNER JOIN ESPECIALIDAD e ON m.id_especialidad = e.id_especialidad
+LEFT JOIN CITA c ON m.id_medico = c.id_medico
+LEFT JOIN ACTIVIDAD_ASISTENCIAL a ON c.id_cita = a.id_cita
+GROUP BY m.id_medico, m.nombres, m.apellidos, e.nombre;
+GO
+
+CREATE VIEW vista_diagnosticos_frecuentes AS
+SELECT
+    codigo_cie10,
+    descripcion,
+    COUNT(*) AS total_casos
+FROM DIAGNOSTICO
+GROUP BY codigo_cie10, descripcion;
+GO
+
+CREATE FUNCTION calcular_edad (@fecha_nac DATE)
+RETURNS INT
+AS
+BEGIN
+    DECLARE @edad INT;
+    SET @edad = DATEDIFF(YEAR, @fecha_nac, GETDATE()) 
+                - CASE 
+                    WHEN (MONTH(@fecha_nac) > MONTH(GETDATE())) 
+                         OR (MONTH(@fecha_nac) = MONTH(GETDATE()) AND DAY(@fecha_nac) > DAY(GETDATE()))
+                    THEN 1 ELSE 0 
+                  END;
+    RETURN @edad;
+END;
+GO
+
+CREATE PROCEDURE registrar_cita
+    @p_id_paciente INT,
+    @p_id_medico INT,
+    @p_fecha_hora DATETIME,
+    @p_motivo VARCHAR(255)
+AS
+BEGIN
+    INSERT INTO CITA (id_paciente, id_medico, fecha_hora, motivo, estado)
+    VALUES (@p_id_paciente, @p_id_medico, @p_fecha_hora, @p_motivo, 'Programada');
+    
+    PRINT 'Cita registrada exitosamente para el paciente ' + CAST(@p_id_paciente AS VARCHAR);
+END;
+GO
+
+CREATE TRIGGER trg_actualizar_cita
+ON ACTIVIDAD_ASISTENCIAL
+AFTER INSERT
+AS
+BEGIN
+    UPDATE CITA 
+    SET estado = 'Atendida' 
+    WHERE id_cita IN (SELECT id_cita FROM inserted);
+END;
+GO
+
+SELECT
+    id_paciente,
+    nombres,
+    apellidos,
+    cedula,
+    fecha_nacimiento,
+    dbo.calcular_edad(fecha_nacimiento) AS edad
+FROM PACIENTE
+ORDER BY apellidos, nombres;
+GO
+
+SELECT
+    c.id_cita,
+    CONCAT(p.nombres, ' ', p.apellidos) AS paciente,
+    CONCAT(m.nombres, ' ', m.apellidos) AS medico,
+    c.fecha_hora,
+    c.motivo
+FROM CITA c
+INNER JOIN PACIENTE p ON c.id_paciente = p.id_paciente
+INNER JOIN MEDICO m ON c.id_medico = m.id_medico
+WHERE CAST(c.fecha_hora AS DATE) = CAST(GETDATE() AS DATE)
+AND c.estado = 'Programada';
+GO
+
+SELECT
+    e.nombre AS especialidad,
+    COUNT(DISTINCT a.id_actividad) AS total_actividades,
+    SUM(a.costo) AS ingresos_totales
+FROM ESPECIALIDAD e
+INNER JOIN MEDICO m ON e.id_especialidad = m.id_especialidad
+INNER JOIN CITA c ON m.id_medico = c.id_medico
+INNER JOIN ACTIVIDAD_ASISTENCIAL a ON c.id_cita = a.id_cita
+GROUP BY e.nombre
+ORDER BY ingresos_totales DESC;
+GO
+
+SELECT TOP 5
+    codigo_cie10,
+    descripcion,
+    COUNT(*) AS total_casos
+FROM DIAGNOSTICO
+GROUP BY codigo_cie10, descripcion
+ORDER BY total_casos DESC;
+GO
+
+SELECT * FROM vista_medico WHERE cedula = '0102030405';
+GO
+
+SELECT
+    CONCAT(p.nombres, ' ', p.apellidos) AS paciente,
+    h.alergias
+FROM PACIENTE p
+INNER JOIN HISTORIAL_CLINICO h ON p.id_paciente = h.id_paciente
+WHERE h.alergias IS NOT NULL AND h.alergias <> 'Ninguna';
+GO
+
+IF NOT EXISTS (SELECT * FROM sys.database_principals WHERE name = 'recepcionista' AND type = 'R')
+    CREATE ROLE recepcionista;
+GO
+
+IF NOT EXISTS (SELECT * FROM sys.database_principals WHERE name = 'medico' AND type = 'R')
+    CREATE ROLE medico;
+GO
+
+IF NOT EXISTS (SELECT * FROM sys.database_principals WHERE name = 'administrador' AND type = 'R')
+    CREATE ROLE administrador;
+GO
+
+IF NOT EXISTS (SELECT * FROM sys.database_principals WHERE name = 'analista' AND type = 'R')
+    CREATE ROLE analista;
+GO
+
+GRANT SELECT, INSERT, UPDATE ON CITA TO recepcionista;
+GRANT SELECT, INSERT, UPDATE ON PACIENTE TO recepcionista;
+GRANT SELECT ON vista_recepcionista TO recepcionista;
+DENY SELECT ON HISTORIAL_CLINICO TO recepcionista;
+DENY SELECT ON DIAGNOSTICO TO recepcionista;
+GO
+
+GRANT SELECT ON HISTORIAL_CLINICO TO medico;
+GRANT SELECT, INSERT ON DIAGNOSTICO TO medico;
+GRANT SELECT, INSERT ON ACTIVIDAD_ASISTENCIAL TO medico;
+GRANT SELECT ON vista_medico TO medico;
+GO
+
+GRANT SELECT ON vista_administrador TO administrador;
+GRANT SELECT ON vista_diagnosticos_frecuentes TO administrador;
+GO
+
+GRANT SELECT ON SCHEMA::dbo TO analista;
+GO
+
+SELECT 
+    dp.name AS rol,
+    o.name AS objeto,
+    p.permission_name,
+    p.state_desc
+FROM sys.database_permissions p
+INNER JOIN sys.database_principals dp ON p.grantee_principal_id = dp.principal_id
+INNER JOIN sys.objects o ON p.major_id = o.object_id
+WHERE dp.type = 'R';
+GO
+
+SELECT 
+    t.name AS tabla,
+    i.name AS indice,
+    i.type_desc
+FROM sys.indexes i
+INNER JOIN sys.tables t ON i.object_id = t.object_id
+WHERE i.name IS NOT NULL;
+GO
